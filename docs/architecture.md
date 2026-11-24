@@ -37,7 +37,17 @@ validated before reuse.
 
 The cache key includes recipe hashes and commits, Codex executable identity,
 profile/model settings, Codex configuration hash, prompt hash, and output
-schema hash. Changing any of these causes a new review.
+schema hash. Changing any of these causes a new review. Cached findings are
+validated against the current schema, including severity, confidence, and
+field lengths.
+
+The prompt asks for a static walk through the package lifecycle: build-user
+recipe functions, package-manager install scripts, source provenance and
+integrity, data access, privilege changes, and host effects. Findings must
+include evidence and separate confidence from severity. It prohibits running
+package code or fetching upstream payloads; the review therefore cannot
+evaluate binaries or source archives that are not present in the AUR recipe
+repository.
 
 ## Trust boundaries
 

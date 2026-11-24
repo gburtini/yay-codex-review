@@ -14,7 +14,9 @@ project.
 For `yay -Syu`, the `UpgradeSelect` hook gathers AUR package bases from the
 selected upgrades and pulled dependencies. The helper fetches their AUR Git
 recipes and asks Codex to inspect `PKGBUILD`, `.SRCINFO`, install scripts,
-patches, and available commit diffs. It prints up to five actionable findings
+patches, and available commit diffs. It traces build and install actions,
+source integrity, permissions, data access, and host modifications, then prints
+up to eight actionable findings with severity and confidence
 or reports that it found none.
 
 Before each AUR build, `AURPreInstall` compares the build files' SHA-256 hashes
@@ -63,7 +65,8 @@ recipe content and diffs available from the recipe Git repository. It does not
 download or inspect upstream source archives, binaries, or other payloads, and
 it cannot prove that upstream downloads match the recipe's claims. A clean
 result means only that Codex reported no actionable issue in the reviewed
-files.
+files. The prompt asks for static analysis only; package code is never run as
+part of the review.
 
 If fetching or reviewing fails, the helper asks before proceeding without a
 completed review. The explicit “install anyway” choice bypasses review by
