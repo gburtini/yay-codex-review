@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_yay="${YAY_REAL_BIN:-/usr/bin/yay}"
+review_helper="${YAY_CODEX_REVIEW_HELPER:-$HOME/.local/lib/yay-codex-review/yay-codex-review}"
+sync_operation=false
+update_operation=false
+refresh_operation=false
+search_operation=false
+force_aur=false
+expect_value=false
+if [[ "$#" -eq 0 ]]; then
+  sync_operation=true
+  update_operation=true
+fi
+if [[ "$#" -gt 0 && "$1" != -* ]]; then
+  # yay treats bare package targets as a package operation.
+  sync_operation=true
+fi
+targets=()
+declare -A seen_targets=()
+
+for arg in "$@"; do
+  if [[ "$expect_value" == true ]]; then
+    expect_value=false
+    continue
+  fi
+
+  case "$arg" in
+    --config|--aururl|--aurrpcurl|--builddir|--editor|--editorflags|--makepkg|--mflags|--pacman|--git|--gitflags|--gpg|--gpgflags|--sudo|--sudoflags|--ignore|--overwrite|--assume-installed)
+      expect_value=true
+      continue
+      ;;
+    --sync)
+      sync_operation=true
+      continue
+      ;;
+    --aur)
+      sync_operation=true
+      force_aur=true
+      continue
+      ;;
+    --help|-h|--version|-V)
+      exec "$real_yay" "$@"
+      ;;
+    --sysupgrade)
+      sync_operation=true
+      update_operation=true
+      continue
+      ;;
+    --refresh)
+      sync_operation=true
+      refresh_operation=true
+      continue
+      ;;
+  esac
+
+  if [[ "$arg" == -* ]]; then
+    short_flags="${arg#-}"
+    if [[ "$short_flags" == *S* ]]; then
+      sync_operation=true
+      if [[ "$short_flags" == *u* ]]; then
+        update_operation=true
+      fi
+      if [[ "$short_flags" == *y* ]]; then
+        refresh_operation=true
+      fi
+      if [[ "$short_flags" == *s* || "$short_flags" == *i* || "$short_flags" == *l* || "$short_flags" == *p* ]]; then
+        search_operation=true
+      fi
+      if [[ "$short_flags" == *g* || "$short_flags" == *c* ]]; then
+        search_operation=true
+      fi
+    elif [[ "$short_flags" == *a* ]]; then
+      sync_operation=true
+      force_aur=true
+    fi
+    continue
+  fi
+
+  targets+=("$arg")
+done
+
+# yay's native UpgradeSelect hook sees the complete AUR sysupgrade set.
+if [[ "$sync_operation" != true || "$search_operation" == true ]]; then
+  exec "$real_yay" "$@"
+fi
+
+if [[ "$update_operation" == true ]]; then
+  marker_dir="${XDG_CACHE_HOME:-$HOME/.cache}/yay"
+  mkdir -p -m 700 "$marker_dir"
+  marker="$(mktemp "$marker_dir/post-install-marker.XXXXXXXX")"
+  rm -f -- "$marker"
+  trap 'rm -f -- "$marker"' EXIT
+
+  set +e
+  YAY_CLEANUP_POSTINSTALL_MARKER="$marker" "$real_yay" "$@"
+  yay_status=$?
+  set -e
+
+  if [[ "$yay_status" -eq 0 && ! -e "$marker" ]]; then
+    "$review_helper" suggest-cleanup
+  fi
+  exit "$yay_status"
+fi
+
+if [[ "${#targets[@]}" -eq 0 ]]; then
+  if [[ "$refresh_operation" == true ]]; then
+    exec "$real_yay" "$@"
+  fi
+  manifest_dir="${XDG_CACHE_HOME:-$HOME/.cache}/yay"
+  mkdir -p -m 700 "$manifest_dir"
+  manifest="$(mktemp "$manifest_dir/codex-review-manifest.XXXXXXXX")"
+  chmod 600 "$manifest"
+  trap 'rm -f -- "$manifest"' EXIT
+  "$review_helper" allow-unreviewed "$manifest"
+  YAY_CODEX_REVIEW_MANIFEST="$manifest" "$real_yay" "$@"
+  exit $?
+fi
+
+aur_targets=()
+for target in "${targets[@]}"; do
+  package="${target##*/}"
+  package="${package%%=*}"
+  [[ "$package" =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]] || continue
+  [[ -z "${seen_targets[$package]:-}" ]] || continue
+  seen_targets[$package]=1
+  if [[ "$force_aur" == true ]] || ! /usr/bin/pacman -Si "$package" >/dev/null 2>&1; then
+    aur_targets+=("$package")
+  fi
+done
+
+if [[ "${#aur_targets[@]}" -eq 0 ]]; then
+  exec "$real_yay" "$@"
+fi
+
+manifest_dir="${XDG_CACHE_HOME:-$HOME/.cache}/yay"
+mkdir -p -m 700 "$manifest_dir"
+manifest="$(mktemp "$manifest_dir/codex-review-manifest.XXXXXXXX")"
+chmod 600 "$manifest"
+trap 'rm -f -- "$manifest"' EXIT
+
+"$review_helper" review "$manifest" "${aur_targets[@]}"
+YAY_CODEX_REVIEW_MANIFEST="$manifest" "$real_yay" "$@"
